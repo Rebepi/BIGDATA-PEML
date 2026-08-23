@@ -74,6 +74,27 @@ import logging
 logger = logging.getLogger("auth_utils")
 
 
+def _send_via_resend(to_email: str, subject: str, html_content: str, text_content: str) -> dict:
+    """Envía email usando la API HTTP de Resend (funciona en Render free tier)."""
+    try:
+        import resend
+        resend.api_key = settings.resend_api_key
+        r = resend.Emails.send({
+            "from": f"Sistema Gasto Público Perú <onboarding@resend.dev>",
+            "to": [to_email],
+            "subject": subject,
+            "html": html_content,
+            "text": text_content,
+        })
+        if r and r.get("id"):
+            logger.info(f"Correo 2FA enviado via Resend a {to_email}. ID: {r['id']}")
+            return {"sent_via_smtp": True, "email": to_email, "dev_code": None, "error": None}
+        return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": "Resend no devolvió ID de envío."}
+    except Exception as e:
+        logger.error(f"Error al enviar via Resend: {e}")
+        return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": str(e)}
+
+
 def send_email_otp(to_email: str, code: str) -> dict:
     subject = f"🇵🇪 Código de Seguridad 2FA: {code} — Gasto Público Perú"
     
@@ -227,6 +248,9 @@ Si no has intentado iniciar sesión con tu cuenta ({to_email}), puedes ignorar e
 ===================================================================
 © {current_year} Ministerio de Economía y Finanzas · Todos los derechos reservados.
 """
+
+    if settings.resend_api_key and settings.resend_api_key.strip().startswith("re_"):
+        return _send_via_resend(to_email, subject, html_content, text_content)
 
     sent_via_smtp = False
     error_message = None
