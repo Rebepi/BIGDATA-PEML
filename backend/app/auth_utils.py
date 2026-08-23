@@ -123,7 +123,9 @@ def _send_via_brevo(to_email: str, subject: str, html_content: str, text_content
             "textContent": text_content
         }
         
+        print(f"📡 [BREVO] Intentando enviar con remitente: '{sender_email}' hacia '{to_email}'", flush=True)
         resp = requests.post(url, json=payload, headers=headers, timeout=12)
+        print(f"📡 [BREVO] Respuesta HTTP: {resp.status_code} - {resp.text}", flush=True)
         if resp.status_code in (200, 201):
             data = resp.json()
             logger.info(f"Correo 2FA enviado via Brevo desde {sender_email} hacia {to_email}. MessageId: {data.get('messageId')}")
@@ -133,6 +135,7 @@ def _send_via_brevo(to_email: str, subject: str, html_content: str, text_content
             logger.error(err_msg)
             return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": err_msg}
     except Exception as e:
+        print(f"❌ [BREVO EXCEPTION]: {e}", flush=True)
         logger.error(f"Error al enviar via Brevo: {e}")
         return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": str(e)}
 
@@ -353,14 +356,18 @@ Si no has intentado iniciar sesión con tu cuenta ({to_email}), puedes ignorar e
     clean_brevo_key = (settings.brevo_api_key or "").strip().strip('"').strip("'")
     clean_resend_key = (settings.resend_api_key or "").strip().strip('"').strip("'")
 
-    logger.info(f"📤 Preparando envío 2FA para {to_email}. Brevo activo: {bool(clean_brevo_key)}, Resend activo: {bool(clean_resend_key)}")
+    print(f"🔑 [2FA OTP GENERADO] Código: {code} para {to_email}", flush=True)
+    print(f"📤 [ENVIO 2FA] Brevo configurado: {bool(clean_brevo_key)} (len={len(clean_brevo_key)}), Resend configurado: {bool(clean_resend_key)}", flush=True)
 
     if clean_brevo_key and "xkeysib-" in clean_brevo_key:
+        print("🚀 [ENVIANDO POR BREVO API]", flush=True)
         return _send_via_brevo(to_email, subject, html_content, text_content)
 
     if clean_resend_key and clean_resend_key.startswith("re_"):
+        print("🚀 [ENVIANDO POR RESEND API]", flush=True)
         return _send_via_resend(to_email, subject, html_content, text_content)
 
+    print("⚠️ [ENVIANDO POR SMTP FALLBACK]", flush=True)
     sent_via_smtp = False
     error_message = None
 
