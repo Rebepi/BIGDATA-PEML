@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     smtp_from: str = "gastope.monitor@gmail.com"
     admin_email: str = "renzobendezu51@gmail.com"
     resend_api_key: str = ""
+    brevo_api_key: str = ""
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_PATH) if ENV_PATH.exists() else None,
