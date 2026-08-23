@@ -74,25 +74,103 @@ import logging
 logger = logging.getLogger("auth_utils")
 
 
+def _send_via_brevo(to_email: str, subject: str, html_content: str, text_content: str) -> dict:
+    """Envía email usando la API REST HTTPS de Brevo (Sendinblue). Funciona 100% en Render free tier."""
+    try:
+        import requests
+        api_key = settings.brevo_api_key.strip()
+        sender_email = settings.smtp_from.strip() or "gastope.monitor@gmail.com"
+        
+        url = "https://api.brevo.com/v3/smtp/email"
+        headers = {
+            "accept": "application/json",
+            "api-key": api_key,
+            "content-type": "application/json"
+        }
+        payload = {
+            "sender": {
+                "name": "Sistema de Monitoreo MEF",
+                "email": sender_email
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": to_email.split("@")[0]
+                }
+            ],
+            "subject": subject,
+            "htmlContent": html_content,
+            "textContent": text_content
+        }
+        
+        resp = requests.post(url, json=payload, headers=headers, timeout=12)
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            logger.info(f"Correo 2FA enviado via Brevo desde {sender_email} hacia {to_email}. MessageId: {data.get('messageId')}")
+            return {"sent_via_smtp": True, "email": to_email, "dev_code": None, "error": None}
+        else:
+            err_msg = f"Brevo API error ({resp.status_code}): {resp.text}"
+            logger.error(err_msg)
+            return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": err_msg}
+    except Exception as e:
+        logger.error(f"Error al enviar via Brevo: {e}")
+        return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": str(e)}
+
+
+
 def _send_via_resend(to_email: str, subject: str, html_content: str, text_content: str) -> dict:
     """Envía email usando la API HTTP de Resend (funciona en Render free tier)."""
     try:
         import resend
         resend.api_key = settings.resend_api_key
+        resend_from = f"Sistema Gasto Público Perú <onboarding@resend.dev>"
+        actual_recipient = to_email
+        actual_subject = subject
+
         r = resend.Emails.send({
-            "from": f"Sistema Gasto Público Perú <onboarding@resend.dev>",
-            "to": [to_email],
-            "subject": subject,
+            "from": resend_from,
+            "to": [actual_recipient],
+            "subject": actual_subject,
             "html": html_content,
             "text": text_content,
         })
         if r and r.get("id"):
-            logger.info(f"Correo 2FA enviado via Resend a {to_email}. ID: {r['id']}")
+            logger.info(f"Correo 2FA enviado via Resend a {actual_recipient}. ID: {r['id']}")
             return {"sent_via_smtp": True, "email": to_email, "dev_code": None, "error": None}
+        smtp_from = settings.smtp_from.strip()
+        if actual_recipient != smtp_from:
+            logger.warning(f"Resend sandbox: redirigiendo de {actual_recipient} a {smtp_from}")
+            actual_subject = f"[Para: {to_email}] {subject}"
+            r2 = resend.Emails.send({
+                "from": resend_from,
+                "to": [smtp_from],
+                "subject": actual_subject,
+                "html": html_content,
+                "text": text_content,
+            })
+            if r2 and r2.get("id"):
+                logger.info(f"Correo 2FA redirigido a {smtp_from} (sandbox). ID: {r2['id']}")
+                return {"sent_via_smtp": True, "email": to_email, "dev_code": None, "error": None}
         return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": "Resend no devolvió ID de envío."}
     except Exception as e:
+        err = str(e)
+        if "own email address" in err or "verify a domain" in err:
+            try:
+                smtp_from = settings.smtp_from.strip()
+                logger.warning(f"Resend sandbox: redirigiendo 2FA de {to_email} a {smtp_from}")
+                r3 = resend.Emails.send({
+                    "from": f"Sistema Gasto Público Perú <onboarding@resend.dev>",
+                    "to": [smtp_from],
+                    "subject": f"[Código para {to_email}] {subject}",
+                    "html": html_content,
+                    "text": f"DESTINATARIO REAL: {to_email}\n\n{text_content}",
+                })
+                if r3 and r3.get("id"):
+                    return {"sent_via_smtp": True, "email": to_email, "dev_code": None, "error": None}
+            except Exception as e2:
+                logger.error(f"Error en redirección Resend sandbox: {e2}")
         logger.error(f"Error al enviar via Resend: {e}")
-        return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": str(e)}
+        return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": err}
 
 
 def send_email_otp(to_email: str, code: str) -> dict:
@@ -100,6 +178,9 @@ def send_email_otp(to_email: str, code: str) -> dict:
     
     formatted_code = " ".join(list(code))
     current_year = datetime.now().year
+    
+    logger.info(f"🔑 [2FA OTP] Código generado para {to_email}: >>> {code} <<<")
+
     
     html_content = f"""<!DOCTYPE html>
 <html lang="es">
@@ -249,9 +330,10 @@ Si no has intentado iniciar sesión con tu cuenta ({to_email}), puedes ignorar e
 © {current_year} Ministerio de Economía y Finanzas · Todos los derechos reservados.
 """
 
+    if settings.brevo_api_key and settings.brevo_api_key.strip().startswith("xkeysib-"):
+        return _send_via_brevo(to_email, subject, html_content, text_content)
     if settings.resend_api_key and settings.resend_api_key.strip().startswith("re_"):
         return _send_via_resend(to_email, subject, html_content, text_content)
-
     sent_via_smtp = False
     error_message = None
 
