@@ -78,7 +78,7 @@ def _send_via_brevo(to_email: str, subject: str, html_content: str, text_content
     """Envía email usando la API REST HTTPS de Brevo (Sendinblue). Funciona 100% en Render free tier."""
     try:
         import requests
-        api_key = settings.brevo_api_key.strip()
+        api_key = (settings.brevo_api_key or "").strip().strip('"').strip("'")
         
         sender_email = (getattr(settings, "brevo_sender_email", "") or "").strip()
         sender_name = "Sistema de Monitoreo MEF"
@@ -350,10 +350,17 @@ Si no has intentado iniciar sesión con tu cuenta ({to_email}), puedes ignorar e
 © {current_year} Ministerio de Economía y Finanzas · Todos los derechos reservados.
 """
 
-    if settings.brevo_api_key and settings.brevo_api_key.strip().startswith("xkeysib-"):
+    clean_brevo_key = (settings.brevo_api_key or "").strip().strip('"').strip("'")
+    clean_resend_key = (settings.resend_api_key or "").strip().strip('"').strip("'")
+
+    logger.info(f"📤 Preparando envío 2FA para {to_email}. Brevo activo: {bool(clean_brevo_key)}, Resend activo: {bool(clean_resend_key)}")
+
+    if clean_brevo_key and "xkeysib-" in clean_brevo_key:
         return _send_via_brevo(to_email, subject, html_content, text_content)
-    if settings.resend_api_key and settings.resend_api_key.strip().startswith("re_"):
+
+    if clean_resend_key and clean_resend_key.startswith("re_"):
         return _send_via_resend(to_email, subject, html_content, text_content)
+
     sent_via_smtp = False
     error_message = None
 
