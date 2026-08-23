@@ -79,17 +79,37 @@ def _send_via_brevo(to_email: str, subject: str, html_content: str, text_content
     try:
         import requests
         api_key = settings.brevo_api_key.strip()
-        sender_email = settings.smtp_from.strip() or "gastope.monitor@gmail.com"
         
-        url = "https://api.brevo.com/v3/smtp/email"
+        sender_email = (getattr(settings, "brevo_sender_email", "") or "").strip()
+        sender_name = "Sistema de Monitoreo MEF"
+        
         headers = {
             "accept": "application/json",
             "api-key": api_key,
             "content-type": "application/json"
         }
+
+        if not sender_email:
+            try:
+                s_resp = requests.get("https://api.brevo.com/v3/senders", headers=headers, timeout=5)
+                if s_resp.status_code == 200:
+                    senders_list = s_resp.json().get("senders", [])
+                    active_senders = [s for s in senders_list if s.get("active")]
+                    if active_senders:
+                        sender_email = active_senders[0]["email"]
+                        if active_senders[0].get("name"):
+                            sender_name = active_senders[0]["name"]
+                        logger.info(f"Remitente verificado Brevo detectado automáticamente: {sender_email}")
+            except Exception as e_senders:
+                logger.warning(f"No se pudo consultar lista de remitentes Brevo: {e_senders}")
+
+        if not sender_email:
+            sender_email = settings.smtp_from.strip() or "gastope.monitor@gmail.com"
+        
+        url = "https://api.brevo.com/v3/smtp/email"
         payload = {
             "sender": {
-                "name": "Sistema de Monitoreo MEF",
+                "name": sender_name,
                 "email": sender_email
             },
             "to": [
