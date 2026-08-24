@@ -129,6 +129,10 @@ def iniciar_sesion(req: LoginRequest, db: Session = Depends(get_db)):
         Codigo2FA.usado == False
     ).update({"usado": True})
 
+    db.query(Codigo2FA).filter(
+        Codigo2FA.expira_en < datetime.utcnow() - timedelta(hours=1)
+    ).delete(synchronize_session=False)
+
     nuevo_codigo = Codigo2FA(
         usuario_id=usuario.id,
         codigo=codigo,
@@ -232,10 +236,16 @@ def reenviar_codigo_2fa(req: Resend2FARequest, db: Session = Depends(get_db)):
     codigo = generate_otp()
     expira_en = datetime.utcnow() + timedelta(minutes=10)
 
+    # 1. Invalidar códigos activos anteriores
     db.query(Codigo2FA).filter(
         Codigo2FA.usuario_id == usuario.id,
         Codigo2FA.usado == False
     ).update({"usado": True})
+
+    # 2. Limpieza automática: borrar códigos expirados antiguos
+    db.query(Codigo2FA).filter(
+        Codigo2FA.expira_en < datetime.utcnow() - timedelta(hours=1)
+    ).delete(synchronize_session=False)
 
     nuevo_codigo = Codigo2FA(
         usuario_id=usuario.id,
