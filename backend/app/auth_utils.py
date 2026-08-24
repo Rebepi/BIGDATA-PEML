@@ -145,55 +145,25 @@ def _send_via_resend(to_email: str, subject: str, html_content: str, text_conten
     """Envía email usando la API HTTP de Resend (funciona en Render free tier)."""
     try:
         import resend
-        resend.api_key = settings.resend_api_key
+        resend.api_key = (settings.resend_api_key or "").strip().strip('"').strip("'")
         resend_from = f"Sistema Gasto Público Perú <onboarding@resend.dev>"
-        actual_recipient = to_email
-        actual_subject = subject
 
+        print(f"📡 [RESEND] Enviando correo 2FA a '{to_email}' desde '{resend_from}'...", flush=True)
         r = resend.Emails.send({
             "from": resend_from,
-            "to": [actual_recipient],
-            "subject": actual_subject,
+            "to": [to_email],
+            "subject": subject,
             "html": html_content,
             "text": text_content,
         })
+        print(f"📡 [RESEND] Respuesta: {r}", flush=True)
         if r and r.get("id"):
-            logger.info(f"Correo 2FA enviado via Resend a {actual_recipient}. ID: {r['id']}")
+            print(f"✅ [RESEND] Enviado con éxito. ID: {r['id']}", flush=True)
             return {"sent_via_smtp": True, "email": to_email, "dev_code": None, "error": None}
-        smtp_from = settings.smtp_from.strip()
-        if actual_recipient != smtp_from:
-            logger.warning(f"Resend sandbox: redirigiendo de {actual_recipient} a {smtp_from}")
-            actual_subject = f"[Para: {to_email}] {subject}"
-            r2 = resend.Emails.send({
-                "from": resend_from,
-                "to": [smtp_from],
-                "subject": actual_subject,
-                "html": html_content,
-                "text": text_content,
-            })
-            if r2 and r2.get("id"):
-                logger.info(f"Correo 2FA redirigido a {smtp_from} (sandbox). ID: {r2['id']}")
-                return {"sent_via_smtp": True, "email": to_email, "dev_code": None, "error": None}
         return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": "Resend no devolvió ID de envío."}
     except Exception as e:
-        err = str(e)
-        if "own email address" in err or "verify a domain" in err:
-            try:
-                smtp_from = settings.smtp_from.strip()
-                logger.warning(f"Resend sandbox: redirigiendo 2FA de {to_email} a {smtp_from}")
-                r3 = resend.Emails.send({
-                    "from": f"Sistema Gasto Público Perú <onboarding@resend.dev>",
-                    "to": [smtp_from],
-                    "subject": f"[Código para {to_email}] {subject}",
-                    "html": html_content,
-                    "text": f"DESTINATARIO REAL: {to_email}\n\n{text_content}",
-                })
-                if r3 and r3.get("id"):
-                    return {"sent_via_smtp": True, "email": to_email, "dev_code": None, "error": None}
-            except Exception as e2:
-                logger.error(f"Error en redirección Resend sandbox: {e2}")
-        logger.error(f"Error al enviar via Resend: {e}")
-        return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": err}
+        print(f"❌ [RESEND EXCEPTION]: {e}", flush=True)
+        return {"sent_via_smtp": False, "email": to_email, "dev_code": None, "error": str(e)}
 
 
 def send_email_otp(to_email: str, code: str) -> dict:
@@ -359,13 +329,13 @@ Si no has intentado iniciar sesión con tu cuenta ({to_email}), puedes ignorar e
     print(f"🔑 [2FA OTP GENERADO] Código: {code} para {to_email}", flush=True)
     print(f"📤 [ENVIO 2FA] Brevo configurado: {bool(clean_brevo_key)} (len={len(clean_brevo_key)}), Resend configurado: {bool(clean_resend_key)}", flush=True)
 
-    if clean_brevo_key and "xkeysib-" in clean_brevo_key:
-        print("🚀 [ENVIANDO POR BREVO API]", flush=True)
-        return _send_via_brevo(to_email, subject, html_content, text_content)
-
     if clean_resend_key and clean_resend_key.startswith("re_"):
         print("🚀 [ENVIANDO POR RESEND API]", flush=True)
         return _send_via_resend(to_email, subject, html_content, text_content)
+
+    if clean_brevo_key and "xkeysib-" in clean_brevo_key:
+        print("🚀 [ENVIANDO POR BREVO API]", flush=True)
+        return _send_via_brevo(to_email, subject, html_content, text_content)
 
     print("⚠️ [ENVIANDO POR SMTP FALLBACK]", flush=True)
     sent_via_smtp = False
